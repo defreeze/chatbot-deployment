@@ -1,61 +1,38 @@
-import random
-import json
+import os
+import openai
+import pinecone
+from langchain.embeddings import OpenAIEmbeddings
 
-import torch
-
-from model import NeuralNet
-from nltk_utils import bag_of_words, tokenize
-
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-with open('intents.json', 'r') as json_data:
-    intents = json.load(json_data)
-
-FILE = "data.pth"
-data = torch.load(FILE)
-
-input_size = data["input_size"]
-hidden_size = data["hidden_size"]
-output_size = data["output_size"]
-all_words = data['all_words']
-tags = data['tags']
-model_state = data["model_state"]
-
-model = NeuralNet(input_size, hidden_size, output_size).to(device)
-model.load_state_dict(model_state)
-model.eval()
-
-bot_name = "Sam"
-
-def get_response(msg):
-    sentence = tokenize(msg)
-    X = bag_of_words(sentence, all_words)
-    X = X.reshape(1, X.shape[0])
-    X = torch.from_numpy(X).to(device)
-
-    output = model(X)
-    _, predicted = torch.max(output, dim=1)
-
-    tag = tags[predicted.item()]
-
-    probs = torch.softmax(output, dim=1)
-    prob = probs[0][predicted.item()]
-    if prob.item() > 0.75:
-        for intent in intents['intents']:
-            if tag == intent["tag"]:
-                return random.choice(intent['responses'])
-    
-    return "I do not understand..."
+query = "What is Antler?"
+embeddings_model = OpenAIEmbeddings(
+    openai_api_key="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"
+)
+embedded_query = embeddings_model.embed_query(query)
+print(embedded_query[:5])
 
 
-if __name__ == "__main__":
-    print("Let's chat! (type 'quit' to exit)")
-    while True:
-        # sentence = "do you use credit cards?"
-        sentence = input("You: ")
-        if sentence == "quit":
-            break
+pinecone.init(
+    api_key="3405e0f4-766b-41a4-a69f-59ad4c6c4af7", environment="us-west4-gcp-free"
+)
+# openai.organization = "openai-org-id"
+openai.api_key = "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"
 
-        resp = get_response(sentence)
-        print(resp)
 
+response = openai.Embedding.create(input=query, model="text-embedding-ada-002")
+query_embedding = response["data"][0]["embedding"]
+
+num_results = 5
+index = pinecone.Index("index1536")
+
+
+try:
+    results = index.query(embedded_query, k=num_results, top_k=5, include_metadata=True)
+except Exception as e:
+    print(f"Error during querying: {e}")
+
+
+print(results)
+for match in results["matches"]:
+    print(f"Text chunk: {match['metadata']['text']}")
+    print(f"Similarity score: {match['score']}")
+    print("\n")
